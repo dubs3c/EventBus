@@ -1,7 +1,8 @@
-package main
+package EventBus
 
 import (
 	"context"
+	"sync"
 )
 
 type Bus interface {
@@ -13,39 +14,48 @@ type Bus interface {
 }
 
 type EventBus struct {
-	Channels map[string][]chan interface{}
-	Ctx      context.Context
+	Channels  map[string][]chan interface{}
+	Ctx       context.Context
+	CtxCancel context.CancelFunc
+	WaitGroup *sync.WaitGroup
 }
 
-func NewBus() *EventBus {
+func New() *EventBus {
 	m := make(map[string][]chan interface{})
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	wg := &sync.WaitGroup{}
+
 	return &EventBus{
-		Channels: m,
-		Ctx:      context.Context(context.Background()),
+		Channels:  m,
+		Ctx:       ctx,
+		CtxCancel: ctxCancel,
+		WaitGroup: wg,
 	}
 }
 
-// Emit emits a value onto every channel
+// Emit emits a value onto every channel. Will block until value is received
 func (e *EventBus) Emit(topic string, args ...interface{}) {
 	for _, channel := range e.Channels[topic] {
 		channel <- args
 	}
 }
 
-// Emit emits a value onto every channel
-func (e *EventBus) EmitAsync(topic string, args interface{}) {
-	for i := 0; i < len(e.Channels[topic]); i++ {
-		go func(i int) {
-			channel := e.Channels[topic][i]
-			// There is an issue here
-			// If channel is not receiving, it will block for ever
-			// If the channel is closed, a panic will arise
-			// maybe use context to check if we should abort - did not work, or use it internally??
-			// use wait groups?? maybe together with a done channel or ctx <----
-			// https://www.leolara.me/blog/closing_a_go_channel_written_by_several_goroutines/
-			channel <- args
-		}(i)
-	}
+// Emit emits a value onto every channel in a fan-out fashion. Non-blocking
+func (e *EventBus) EmitAsync(topic string, args ...interface{}) {
+	go func() {
+		for i := 0; i < len(e.Channels[topic]); i++ {
+			e.WaitGroup.Add(1)
+			go func(i int) {
+				defer e.WaitGroup.Done()
+				channel := e.Channels[topic][i]
+				select {
+				case <-e.Ctx.Done():
+					return
+				case channel <- args:
+				}
+			}(i)
+		}
+	}()
 }
 
 func (e *EventBus) Subscribe(topic string, channels ...chan interface{}) {
@@ -53,10 +63,18 @@ func (e *EventBus) Subscribe(topic string, channels ...chan interface{}) {
 }
 
 func (e *EventBus) Unsubscribe(topic string, channel chan interface{}) {
-
+	for i := 0; i < len(e.Channels[topic]); i++ {
+		if e.Channels[topic][i] == channel {
+			copy(e.Channels[topic][i:], e.Channels[topic][i+1:])
+			e.Channels[topic] = e.Channels[topic][:len(e.Channels[topic])-1]
+			break
+		}
+	}
 }
 
 func (e *EventBus) Close() {
+	e.CtxCancel()
+	e.WaitGroup.Wait()
 	for _, topic := range e.Channels {
 		for _, channel := range topic {
 			close(channel)

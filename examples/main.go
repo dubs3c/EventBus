@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	evbus "github.com/dubs3c/EventBus"
 )
 
 func main() {
@@ -48,11 +50,6 @@ func main() {
 			select {
 			case <-ctx.Done():
 				fmt.Println("[CANCELED] this is test two ")
-				// is this an ugly hack?
-				// If context timeout, bug.go:32 will block and crash when trying to send on a closed channel
-				// by reading the value below, we drain the channel and make sure no blocks can happen
-				// and that the goroutine wont try to send on a blocked channel
-				<-c
 			case v := <-d:
 				fmt.Println("[SUCCESS] this is test two, got:", v.(string))
 			}
@@ -89,9 +86,8 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	bus := NewBus()
+	bus := evbus.New()
 	defer bus.Close()
-	bus.Ctx = ctx
 
 	bus.Subscribe("cool", test1(ctx, wg))
 	bus.Subscribe("cool", test2(ctx, wg))
