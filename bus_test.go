@@ -113,15 +113,25 @@ func Test_UnSubscribe(t *testing.T) {
 
 	x := make(chan interface{})
 	y := make(chan interface{})
+	z := make(chan interface{})
+	n := make(chan interface{})
 
-	bus.Subscribe("text", x, y)
+	bus.Subscribe("text", x, y, z, n)
 	bus.Unsubscribe("text", y)
 
-	if len(bus.Channels["text"]) != 1 {
-		t.Errorf("expected 1, got %d", len(bus.Channels["text"]))
+	if len(bus.Channels["text"]) != 3 {
+		t.Errorf("expected 3, got %d", len(bus.Channels["text"]))
 	}
 
 	if bus.Channels["text"][0] != x {
 		t.Errorf("expected %x, got %x", x, bus.Channels["text"][0])
+	}
+
+	if bus.Channels["text"][1] != z {
+		t.Errorf("expected %x, got %x", z, bus.Channels["text"][1])
+	}
+
+	if bus.Channels["text"][2] != n {
+		t.Errorf("expected %x, got %x", n, bus.Channels["text"][2])
 	}
 }
