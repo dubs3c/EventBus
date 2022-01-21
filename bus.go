@@ -14,28 +14,28 @@ type Bus interface {
 }
 
 type EventBus struct {
-	Channels  map[string][]chan interface{}
-	Ctx       context.Context
-	CtxCancel context.CancelFunc
-	WaitGroup *sync.WaitGroup
+	channels  map[string][]chan interface{}
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+	waitGroup *sync.WaitGroup
+	mutex     *sync.Mutex
 }
 
 func New() *EventBus {
-	m := make(map[string][]chan interface{})
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	wg := &sync.WaitGroup{}
 
 	return &EventBus{
-		Channels:  m,
-		Ctx:       ctx,
-		CtxCancel: ctxCancel,
-		WaitGroup: wg,
+		channels:  make(map[string][]chan interface{}),
+		ctx:       ctx,
+		ctxCancel: ctxCancel,
+		waitGroup: &sync.WaitGroup{},
+		mutex:     &sync.Mutex{},
 	}
 }
 
 // Emit emits a value onto every channel. Will block until value is received
 func (e *EventBus) Emit(topic string, args ...interface{}) {
-	for _, channel := range e.Channels[topic] {
+	for _, channel := range e.channels[topic] {
 		channel <- args
 	}
 }
@@ -43,13 +43,13 @@ func (e *EventBus) Emit(topic string, args ...interface{}) {
 // Emit emits a value onto every channel in a fan-out fashion. Non-blocking
 func (e *EventBus) EmitAsync(topic string, args ...interface{}) {
 	go func() {
-		for i := 0; i < len(e.Channels[topic]); i++ {
-			e.WaitGroup.Add(1)
+		for i := 0; i < len(e.channels[topic]); i++ {
+			e.waitGroup.Add(1)
 			go func(i int) {
-				defer e.WaitGroup.Done()
-				channel := e.Channels[topic][i]
+				defer e.waitGroup.Done()
+				channel := e.channels[topic][i]
 				select {
-				case <-e.Ctx.Done():
+				case <-e.ctx.Done():
 					return
 				case channel <- args:
 				}
@@ -58,24 +58,55 @@ func (e *EventBus) EmitAsync(topic string, args ...interface{}) {
 	}()
 }
 
+// Subscribe a channel or multiple channels to a given topic
 func (e *EventBus) Subscribe(topic string, channels ...chan interface{}) {
-	e.Channels[topic] = append(e.Channels[topic], channels...)
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	e.channels[topic] = append(e.channels[topic], channels...)
 }
 
+// Unsubscribe a channel from a given topic
 func (e *EventBus) Unsubscribe(topic string, channel chan interface{}) {
-	for i := 0; i < len(e.Channels[topic]); i++ {
-		if e.Channels[topic][i] == channel {
-			copy(e.Channels[topic][i:], e.Channels[topic][i+1:])
-			e.Channels[topic] = e.Channels[topic][:len(e.Channels[topic])-1]
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	for i := 0; i < len(e.channels[topic]); i++ {
+		if e.channels[topic][i] == channel {
+			copy(e.channels[topic][i:], e.channels[topic][i+1:])
+			e.channels[topic] = e.channels[topic][:len(e.channels[topic])-1]
 			break
 		}
 	}
 }
 
+// CountSubscribers returns the amount of subscribers for a given topic
+func (e *EventBus) CountSubscribers(topic string) int {
+	e.mutex.Lock()
+	c := len(e.channels[topic])
+	e.mutex.Unlock()
+	return c
+}
+
+// GetSubscribers returns a list of channels subscribed to a topic
+func (e *EventBus) GetSubscribers(topic string) []chan interface{} {
+	e.mutex.Lock()
+	c := e.channels[topic]
+	e.mutex.Unlock()
+	return c
+}
+
+// RemoveTopic will remove a given topic and its subscribers from the topic list
+func (e *EventBus) RemoveTopic(topic string) {
+	e.mutex.Lock()
+	defer e.mutex.Unlock()
+	delete(e.channels, topic)
+
+}
+
+// Close closes all channels subscribed to a topic
 func (e *EventBus) Close() {
-	e.CtxCancel()
-	e.WaitGroup.Wait()
-	for _, topic := range e.Channels {
+	e.ctxCancel()
+	e.waitGroup.Wait()
+	for _, topic := range e.channels {
 		for _, channel := range topic {
 			close(channel)
 		}

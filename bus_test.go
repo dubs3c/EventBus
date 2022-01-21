@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func Test_RaceCondtion(t *testing.T) {
+func Test_RaceCondition(t *testing.T) {
 
 	consumeMath := func(wg *sync.WaitGroup) chan interface{} {
 		wg.Add(1)
@@ -98,12 +98,12 @@ func Test_Subscribe(t *testing.T) {
 	bus.Subscribe("text", make(chan interface{}), make(chan interface{}))
 	bus.Subscribe("awesome", make(chan interface{}), make(chan interface{}), make(chan interface{}))
 
-	if len(bus.Channels["text"]) != 2 {
-		t.Errorf("expected 2, got %d", len(bus.Channels["text"]))
+	if bus.CountSubscribers("text") != 2 {
+		t.Errorf("expected 2, got %d", len(bus.channels["text"]))
 	}
 
-	if len(bus.Channels["awesome"]) != 3 {
-		t.Errorf("expected 3, got %d", len(bus.Channels["awesome"]))
+	if bus.CountSubscribers("awesome") != 3 {
+		t.Errorf("expected 3, got %d", len(bus.channels["awesome"]))
 	}
 }
 
@@ -119,19 +119,42 @@ func Test_UnSubscribe(t *testing.T) {
 	bus.Subscribe("text", x, y, z, n)
 	bus.Unsubscribe("text", y)
 
-	if len(bus.Channels["text"]) != 3 {
-		t.Errorf("expected 3, got %d", len(bus.Channels["text"]))
+	if bus.CountSubscribers("text") != 3 {
+		t.Errorf("expected 3, got %d", len(bus.channels["text"]))
 	}
 
-	if bus.Channels["text"][0] != x {
-		t.Errorf("expected %x, got %x", x, bus.Channels["text"][0])
+	if bus.GetSubscribers("text")[0] != x {
+		t.Errorf("expected %x, got %x", x, bus.channels["text"][0])
 	}
 
-	if bus.Channels["text"][1] != z {
-		t.Errorf("expected %x, got %x", z, bus.Channels["text"][1])
+	if bus.GetSubscribers("text")[1] != z {
+		t.Errorf("expected %x, got %x", z, bus.channels["text"][1])
 	}
 
-	if bus.Channels["text"][2] != n {
-		t.Errorf("expected %x, got %x", n, bus.Channels["text"][2])
+	if bus.GetSubscribers("text")[2] != n {
+		t.Errorf("expected %x, got %x", n, bus.channels["text"][2])
+	}
+}
+
+func Test_DeleteTopic(t *testing.T) {
+	bus := New()
+	//defer bus.Close()
+
+	x := make(chan interface{})
+	y := make(chan interface{})
+	z := make(chan interface{})
+	n := make(chan interface{})
+
+	bus.Subscribe("text", x, y, z, n)
+	bus.Subscribe("cool", z, n)
+	bus.RemoveTopic("DoesNotExist")
+	bus.RemoveTopic("text")
+
+	if bus.CountSubscribers("text") != 0 {
+		t.Errorf("expected 0, got %d", bus.CountSubscribers("text"))
+	}
+
+	if bus.CountSubscribers("cool") != 2 {
+		t.Errorf("expected 2, got %d", bus.CountSubscribers("text"))
 	}
 }
